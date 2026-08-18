@@ -1,292 +1,264 @@
 # Robust Humanoid Locomotion Under Unexpected Disturbances
 
-**A controlled ablation of robustness training for a Unitree G1 in MuJoCo.**
-Three policies, identical in every respect except the disturbances they saw during
-training, evaluated under 22,000+ scored pushes.
+I trained three Unitree G1 policies in MuJoCo that are identical in every way
+except one: what happened to them while they were learning to walk.
 
-https://github.com/user-attachments/assets/v3_hero
-<!-- If the embed above does not render, the clip is at results/videos/v3_hero.mp4 -->
+Then I shoved all three, 22,000 times, and measured which ones got back up.
 
-> Same robot. Same seed. Same command. Same 550 N push.
-> Only the training distribution differs.
+![Three policies, one push](results/gifs/v3_hero.gif)
 
----
-
-## The result in one table
-
-**F\*** = the push magnitude at which the policy recovers 50% of the time.
-Torso impulse, 0.1 s, applied while walking forward at 1.0 m/s.
-
-| policy | trained with | **F\*** | vs nominal |
-|---|---|---:|---:|
-| **P1** nominal | nothing | **337 N** | — |
-| **P2** + disturbances | random impulses | **639 N** | **+90%** |
-| **P3** + disturbances + domain rand. | impulses, friction, mass, damping, gains | **654 N** | **+94%** |
-
-### The finding
-
-**Disturbance randomization does essentially all of the work. Domain randomization
-adds +2.4% — within noise, and one direction got *worse*.**
-
-That reproduces a contested result ([Xie et al., 2020](https://arxiv.org/abs/2011.02404)
-found dynamics randomization is not always necessary) on a humanoid, with a
-three-arm ablation rather than a two-way comparison.
-
-**Important caveat, stated up front:** this measures robustness to *forces*. P2 has
-never seen a different friction, mass or damping, so the axis where domain
-randomization *should* pay — transfer to different dynamics — is not yet tested
-here. Do not read this as "domain randomization is useless."
+Same robot. Same seed. Same command. The same 550 N shove at the same instant.
+**Only the training distribution differs.**
 
 ---
 
-## The unexpected result: lateral balance is a training artifact
+## The question
 
-`F*` broken down by push direction:
+Everyone who trains locomotion policies knows the recipe: add random pushes, add
+domain randomization, get a robust policy. It's in every legged-RL repo. But the
+recipe bundles two different interventions together, and nobody running it usually
+stops to ask *which half is doing the work.*
 
-| direction | P1 | P2 | P3 | P1→P2 |
-|---|---:|---:|---:|---:|
-| from behind | 397 | 591 | 628 | +49% |
-| from the front | 387 | 598 | 594 | +55% |
-| from its right | 312 | 654 | 668 | +110% |
-| **from its left** | **267** | **711** | **750** | **+166%** |
+So I separated them.
 
-Lateral was the nominal policy's **weakest** axis — the textbook bipedal result,
-since the frontal plane has far less base of support.
-
-After disturbance training it becomes the **strongest**.
-
-The conclusion is not that lateral balance is easy. It is that **the frontal plane
-is the axis with the most headroom left when you do not train for it.** The classic
-finding measures untrained policies and attributes to morphology what is partly a
-property of the training distribution.
-
----
-
-## Generalization beyond the training range
-
-P2's training distribution tops out at **346 N** realisable. Measured recovery
-above that:
-
-| push | vs training max | P2 recovery |
-|---:|---|---:|
-| 450 N | +30% | 0.860 |
-| 500 N | +44% | 0.820 |
-| 550 N | +59% | 0.732 |
-
-It holds above 80% at forces 44% beyond anything it experienced.
-
----
-
-## Videos
-
-| clip | what it shows |
+| | trained with |
 |---|---|
-| [`v1_problem.mp4`](results/videos/v1_problem.mp4) | The problem. One policy, with and without a push. |
-| [`v2_p1_vs_p2.mp4`](results/videos/v2_p1_vs_p2.mp4) | P1 vs P2 under an identical push. |
-| [`v3_hero.mp4`](results/videos/v3_hero.mp4) | All three policies, identical push. |
+| **P1** — nominal | nothing. Clean floor, clean robot, no disturbances. |
+| **P2** — + pushes | random torso impulses up to 346 N, every 2–5 seconds. |
+| **P3** — + pushes & DR | the same impulses, **plus** randomized friction, mass, joint damping, actuator gains, sensor bias. |
 
-Every clip uses the same seed, command, camera and push. Only the checkpoint changes.
-The renderer **refuses to emit a clip whose push did not fire** — see
-[the engineering log](docs/ENGINEERING_LOG.md) for why that check exists.
+Everything else is byte-identical: the same 16-term reward function, the same
+observations, the same network, the same seed, the same 4096 environments, the
+same 6600 PPO iterations. The *only* thing that changes is the event dictionary.
+
+That's not a claim you should take on faith, so it's mechanically checked —
+`scripts/r1_verify_variants.py` diffs reward weights, observation terms, command
+ranges, episode length and curriculum across all three arms and exits non-zero if
+anything outside `events` differs.
 
 ---
 
-## Method
+## How I measured it
 
-```
-MuJoCo (mjlab / MuJoCo-Warp)
-        ↓
-G1 velocity-tracking locomotion, 29 DoF
-        ↓
-PPO, 4096 envs, 6600 iterations          ← identical for all three arms
-        ↓
-P1: nothing   P2: + impulses   P3: + impulses + domain randomization
-        ↓
-Deterministic evaluation push (exact N, azimuth, instant)
-        ↓
-Latched per-episode recovery metric
-```
+I needed one number that means "how hard a push can this policy survive," so:
 
-### What makes this an ablation rather than a comparison
+**F\*** — the push magnitude at which the policy recovers exactly 50% of the time.
 
-All three policies share an **identical** reward function (16 terms, none added by
-this project), observation space, command distribution, network, seed, environment
-count and iteration budget. The **only** difference is the event dict.
+A 0.1 s impulse to the torso, applied at an exact instant while the robot walks
+forward at 1.0 m/s. Swept from 0 to 1000 N across four directions, 64 environments
+per cell. The protocol shape is borrowed from the published G1 push-recovery
+benchmark so these numbers can be compared against something other than themselves.
 
-That is verified mechanically, not asserted:
+"Recovered" is deliberately strict:
+
+> Within 3 seconds of the push: never exceeded 45° of tilt, tilt returned below
+> 15°, **and** velocity tracking returned to within 1.5× its pre-push error — both
+> held continuously for half a second.
+
+That last clause matters more than it looks. Without it, a policy that survives by
+freezing in a terrified crouch scores a perfect recovery. The whole point is to
+keep *walking*, so the metric has to agree with the reward about that.
+
+---
+
+## Result 1 — pushes do almost all of the work
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/ablation_dark.png">
+  <img alt="F* by policy: P1 337 N, P2 639 N (+90%), P3 654 N (+2.4%)" src="results/figures/ablation_light.png">
+</picture>
+
+Training with disturbances **nearly doubles** the recoverable push. Adding the
+entire domain-randomization stack on top of that buys **+2.4%** — and in one
+direction it actually made things slightly *worse* (598 N → 594 N).
+
+Here's the full picture:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/recovery_curves_dark.png">
+  <img alt="Recovery probability vs push magnitude for all three policies" src="results/figures/recovery_curves_light.png">
+</picture>
+
+Look at the gap between the blue curve and the other two. Then look at how tightly
+orange and green track each other. That's the finding.
+
+This lines up with [Xie et al. (2020)](https://arxiv.org/abs/2011.02404), who found
+dynamics randomization isn't always necessary — a genuinely contested claim, tested
+here on a humanoid with a three-arm ablation rather than a two-way comparison.
+
+**One honest caveat, and it's a big one.** This measures robustness to *forces*.
+P2 has never once seen a different friction coefficient or a different mass. The
+axis where domain randomization *should* earn its keep — transfer to a robot that
+isn't the one you trained on — is specified in `configs/protocol.yaml` and **has
+not been run yet**. Please don't read this as "domain randomization is useless."
+Read it as "on the force axis, it wasn't what mattered."
+
+---
+
+## Result 2 — the one I didn't expect
+
+Bipeds are supposed to be weakest sideways. The frontal plane has almost no base of
+support compared to the sagittal plane, so a lateral shove should be the hardest to
+absorb. My nominal policy agrees: lateral is its worst direction by a wide margin,
+267 N against 397 N from behind.
+
+Then I looked at the trained policies.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="results/figures/fstar_by_direction_dark.png">
+  <img alt="F* by push direction: lateral goes from worst to best after disturbance training" src="results/figures/fstar_by_direction_light.png">
+</picture>
+
+**The weakest axis became the strongest.** 267 N → 711 N, a 166% gain, while the
+sagittal directions improved by roughly 50%.
+
+I don't think this means lateral balance is easy. I think it means the frontal
+plane is where the *most headroom* was sitting, precisely because nothing in
+ordinary flat-ground walking ever forces you to practice it. The textbook result
+measures untrained policies and quietly attributes to morphology something that is
+partly a property of the training distribution.
+
+---
+
+## The story in three clips
+
+**The problem.** One policy, two runs. Left is undisturbed; right gets shoved. This
+robot walks a flawless 1000/1000-step episode and recovers from this particular
+push 1.6% of the time.
+
+![Nominal policy, with and without a push](results/gifs/v1_problem.gif)
+
+**The intervention.** Same push, same seed. The only difference is that the robot
+on the right was pushed around during training.
+
+![P1 versus P2 under an identical push](results/gifs/v2_p1_vs_p2.gif)
+
+Learning to walk is not learning to recover. They're different skills, and you only
+get the second one if you train for it.
+
+---
+
+## What broke along the way
+
+Honestly, this is the part I'd read first if I were you. The full account is in
+[`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md); every entry states what
+looked fine, what was actually wrong, and the measurement that told them apart.
+
+**The metric quietly threw away every failure.**
+Early sweeps reported 100% recovery up to 300 N. Very plausible! Then I looked at
+the sample counts: `n=2` out of 32 at 600 N, and `n=0` at 1000 N. The push event
+cleared its per-environment state *inside* `env.step`, so any episode that fell and
+reset erased its own evidence before the tracker could score it. Recovery rate is
+computed over scored episodes — and the ones being dropped were **exactly the
+failures**. The metric would have reported the policy as invincible in precisely
+the regime where it was collapsing.
+*Every rate in this repo now ships with its `n`.*
+
+**The video showed the opposite of what happened.**
+A clip showed the nominal policy strolling along calmly after a 550 N push that it
+fails **128 times out of 128**. What actually happened: it fell at t≈3.2 s, the
+episode terminated, **reset**, and the robot stood up and walked again inside the
+same clip. A frame grabbed at t=8 s reads as "shrugged it off."
+*Fall termination is now disabled for video rendering, and the renderer refuses to
+emit a clip whose push never fired.*
+
+**A domain-randomization term cost 4 GB and made training 9× slower.**
+`dr.pseudo_inertia` — the physically correct way to randomize mass — turned
+4.7 s/iteration into 43 s. That's 79 hours instead of 10. Its overhead is nearly
+independent of environment count (5,649 MB at 1024 envs, 5,914 MB at 2048), so it's
+the `set_const` recomputation, not per-env storage.
+*And the diagnostic I wrote to find it initially blamed the wrong term, because the
+probe leaked warp allocations between variants — a memory leak inside the memory-leak
+detector.*
+
+**Single clips at probabilistic forces aren't reproducible.**
+Two renders at an identical 450 N and identical seed gave opposite outcomes.
+MuJoCo-Warp on GPU isn't bit-deterministic, and the nominal policy recovers 1.6% of
+the time at that force. Re-rendering until you get the outcome you wanted is
+cherry-picking, full stop.
+*Videos now use conditions where the outcome isn't a coin flip — 550 N lateral,
+where P1 failed 128/128 — and captions state the measured probability.*
+
+---
+
+## Running it yourself
+
+All of this was trained on a **laptop RTX 3060 with 6 GB of VRAM**. About 9.5 hours
+per policy, 28 hours total. No cluster.
 
 ```bash
-python scripts/r1_verify_variants.py
-```
+pip install -r requirements.txt
 
-It compares reward weights, observation terms, corruption flags, command ranges,
-episode length, decimation and curriculum across all three arms, and exits
-non-zero if anything outside `events` differs.
+python scripts/r0_audit.py             # verify environment, pins, reward audit
+python scripts/r1_verify_variants.py   # prove the arms differ only in `events`
 
-### Observations
-
-The actor is **proprioceptive**: base angular velocity, projected gravity, velocity
-command, gait phase, joint positions, joint velocities, previous actions — all with
-noise. **Force magnitude, direction and timing are never observable.** The policy
-reacts to consequences.
-
-(The critic is privileged, as is standard for asymmetric actor-critic. Stated
-explicitly because "proprioceptive policy" would be misleading.)
-
-### Evaluation protocol
-
-Adopted from the published G1 push-recovery benchmark so numbers are comparable
-rather than self-referential: torso impulses, 0.1 s, 45° tilt failure bound.
-
-| | |
-|---|---|
-| push | `torso_link`, exact magnitude and azimuth, 0.1 s, at t=3 s |
-| command | fixed 1.0 m/s forward, no heading randomization, no standing envs |
-| **fall** | terminated, or torso tilt > 45° |
-| **recovered** | within 3 s: never fell, tilt back under 15°, **and** velocity tracking back within 1.5× its pre-push mean — both held 0.5 s |
-| grid | 0–1000 N × 4 directions × 64 envs |
-
-The velocity condition is load-bearing: **a policy that survives by freezing in a
-crouch must not score as a recovery.**
-
-The full protocol was **frozen before any policy was trained**
-([`configs/protocol.yaml`](configs/protocol.yaml)) so the generalization test could
-not be defined after seeing results.
-
----
-
-## Reproducing
-
-Trained on a **laptop RTX 3060, 6 GB** — ~9.5 h per policy, ~28 h total.
-
-```bash
-# 1. Verify the environment (pins, DR surface, reward audit)
-python scripts/r0_audit.py
-
-# 2. Confirm the three arms differ only in `events`
-python scripts/r1_verify_variants.py
-
-# 3. Train one arm (4096 envs, 6600 iters)
 ./scripts/run_train.sh p1nominal Unitree-G1-Robust-P1-Nominal 4096 6600
-
-# 4. Sweep a checkpoint (~40 min)
 ./scripts/run_sweep.sh checkpoints/p1_nominal/model_6599.pt p1_nominal
 
-# 5. Per-direction F*, Wilson intervals, plots
 python scripts/analyze_sweep.py results/push/p1_nominal
-
-# 6. Consolidate everything into results/metrics/
-python scripts/collect_metrics.py
-
-# 7. Render a comparison video
-python scripts/make_split_video.py \
-  --panels 'NOMINAL=checkpoints/p1_nominal/model_6599.pt,ROBUST=checkpoints/p3_robust/model_6599.pt' \
-  --force-n 550 --direction-deg 270 --label compare
+python scripts/collect_metrics.py      # rebuild every number from raw artifacts
+python scripts/make_figures.py         # rebuild every figure above
 ```
 
-Pinned versions are load-bearing — see [`docs/HANDOFF.md`](docs/HANDOFF.md) §2 for why
-each one matters:
-
-```
-torch==2.9.1+cu129   mjlab==1.2.0   mujoco==3.5.0   warp-lang==1.12.0
-```
+The version pins in `requirements.txt` are load-bearing, not cosmetic. torch 2.13
+resolves to a CUDA 13 build and silently trains on CPU against a CUDA 12 driver;
+mujoco ≥ 3.11 breaks `import mujoco_warp`; warp-lang ≥ 1.13 moved `wp.context`.
+Each one cost time to discover.
 
 ---
 
-## What broke, and how it was found
+## The data
 
-Most of the value in this project is in [`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md).
-Every entry states **what looked fine**, **what was actually wrong**, and **the
-measurement that distinguished them**. Four highlights:
+No number in this README was typed by hand. Everything is derived from raw
+artifacts by `scripts/collect_metrics.py`, and every figure is regenerated from
+that by `scripts/make_figures.py`.
 
-**1. The recovery metric silently discarded every failure.**
-Recovery read 1.000 up to 300 N. Plausible — until you looked at the sample counts:
-`n=2` out of 32 at 600 N, `n=0` at 1000 N. The push event cleared its per-env state
-*inside* `env.step`, so every episode that fell and reset erased its own evidence
-before the tracker looked. Recovery rate is computed over scored episodes, and the
-dropped ones were **exactly the failures** — the metric would have reported the
-policy as invincible precisely where it was collapsing.
-→ *Every rate in this repo is reported with its `n`.*
-
-**2. The video showed the opposite of what happened.**
-A clip showed the nominal policy walking calmly after a 550 N push that it fails
-**128 times out of 128**. It had fallen at t≈3.2 s, the episode terminated, **reset**,
-and the robot stood up and walked again inside the same clip. A frame at t=8 s reads
-as "it shrugged off the push."
-→ *Fall termination is disabled for video only, and the renderer now refuses to emit
-a clip whose push did not fire.*
-
-**3. `dr.pseudo_inertia` cost a fixed ~4 GB and made training 9× slower.**
-43 s/iteration instead of 4.7 — 79 hours instead of 10. The overhead is nearly
-independent of environment count (5,649 MB at 1024 envs, 5,914 MB at 2048), so it is
-the `set_const` recomputation, not per-env storage.
-→ *And the diagnostic probe initially blamed the wrong term, because it leaked warp
-allocations between variants — a memory-leak bug inside the memory-leak diagnostic.*
-
-**4. Single clips at probabilistic forces are not reproducible.**
-Two renders at an identical 450 N and seed gave opposite outcomes. MuJoCo-Warp on GPU
-is not bit-deterministic, and the nominal policy recovers 1.6% of the time there.
-Re-rendering until the desired outcome appears is cherry-picking.
-→ *Videos use conditions where the outcome is not a coin flip (550 N lateral: 0/128
-recoveries), and captions state the measured probability.*
-
----
-
-## Data
-
-Everything is machine-readable and regenerable — no hand-typed numbers.
-
-| file | contents |
+| file | what's in it |
 |---|---|
-| [`results/metrics/all_metrics.json`](results/metrics/all_metrics.json) | everything, nested |
-| [`results/metrics/curves.csv`](results/metrics/curves.csv) | policy × direction × force → recovery |
-| [`results/metrics/curves_overall.csv`](results/metrics/curves_overall.csv) | aggregated, with Wilson intervals |
-| [`results/metrics/fstar.csv`](results/metrics/fstar.csv) | policy × direction → F\* |
-| [`results/metrics/ablation.md`](results/metrics/ablation.md) | the summary table |
-| `results/push/*/` | raw sweeps: `results.json`, `curve.png`, per-episode CSV |
+| `results/metrics/all_metrics.json` | everything — curves, F\*, intervals, training traces |
+| `results/metrics/curves.csv` | policy × direction × force → recovery rate |
+| `results/metrics/curves_overall.csv` | aggregated, with Wilson confidence intervals |
+| `results/metrics/fstar.csv` | policy × direction → F\* |
+| `results/push/*/` | raw sweeps: `results.json`, per-episode CSV, plots |
+| `checkpoints/` | all four trained policies |
 
-`python scripts/collect_metrics.py` rebuilds all of it from the raw artifacts.
-
----
-
-## Limitations
-
-Stated plainly rather than buried:
-
-- **Simulation only.** No real-robot validation, and therefore **no sim-to-real
-  claim**. `F*` in MuJoCo is a property of the contact solver as much as of the
-  policy — treat it as a *relative* measure across these three policies, not an
-  absolute spec.
-- **Domain randomization is not fully tested.** The unseen-dynamics evaluation
-  (friction ±50%, mass ±25%, damping ±30%, consecutive pushes) is specified in
-  `configs/protocol.yaml` but **not yet run**. P3's real case is unproven.
-- **Mass randomization models a point mass at the CoM** (a payload), not a density
-  change. `dr.pseudo_inertia` would have been more physical but was unaffordable —
-  see the engineering log.
-- **Flat terrain, one gait speed, one robot.**
-- **P1's advantage is understated:** it converges to a *better* nominal walker than
-  the others (reward 37.0, 0.0% falls undisturbed), which makes its collapse under
-  push a stronger baseline, not a weaker one.
+Branches `p1-nominal`, `p2-push` and `p3-robust` each isolate one arm's checkpoint,
+sweep and video, with a `POLICY.md` describing it. `main` has everything.
 
 ---
 
-## Attribution
+## What this isn't
 
-This repository is derived from
-[**unitreerobotics/unitree_rl_mjlab**](https://github.com/unitreerobotics/unitree_rl_mjlab)
-and builds on [**mjlab**](https://github.com/mujocolab/mjlab) and
-[**MuJoCo**](https://github.com/google-deepmind/mujoco) / MuJoCo-Warp.
+- **It's simulation.** There is no real-robot validation here and I'm making **no
+  sim-to-real claim**. `F*` in MuJoCo is partly a property of the contact solver.
+  Treat it as a *relative* measure across these three policies, not a spec.
+- **Domain randomization hasn't had its fair test.** The unseen-dynamics evaluation
+  is written down but not run. P3's real case is still open.
+- **Mass randomization models a point mass at the CoM** — a payload — not a density
+  change, because the physically correct term was unaffordable on 6 GB.
+- **One robot, flat ground, one gait speed.**
+- **P1 is a strong baseline, not a strawman.** It converges to the *best* nominal
+  walker of the three: reward 37.0, a full 1000/1000-step episode, 0.0% falls when
+  undisturbed. It just can't take a shove.
 
-The G1 robot model, the base velocity task, the PPO runner and the mjlab manager
-framework are upstream work. The contributions here are the disturbance/robustness
-study: `src/tasks/velocity/mdp/disturbance.py`,
-`src/tasks/velocity/mdp/recovery_metrics.py`,
-`src/tasks/velocity/config/g1/robust_env_cfg.py`, the evaluation and analysis
-scripts, the protocol, and the documentation.
+---
 
-> ⚠️ **License:** upstream terms govern the derived code. Confirm
-> `unitree_rl_mjlab`'s license and add the corresponding `LICENSE` file before
-> treating this repository as freely reusable.
+## Credit where it's due
 
-Non-G1 robot mesh directories were removed to keep the repository small; their
-constants modules are retained because the package imports them.
+Built on [**unitree_rl_mjlab**](https://github.com/unitreerobotics/unitree_rl_mjlab),
+[**mjlab**](https://github.com/mujocolab/mjlab), and
+[**MuJoCo**](https://github.com/google-deepmind/mujoco) / MuJoCo-Warp. The G1 model,
+the base velocity task, the PPO runner and the manager framework are all upstream
+work.
+
+What's mine is the study: the deterministic push
+(`src/tasks/velocity/mdp/disturbance.py`), the recovery metric
+(`recovery_metrics.py`), the three ablation arms (`robust_env_cfg.py`), the
+evaluation and analysis tooling, the frozen protocol, and the writeup.
+
+> ⚠️ **Licensing:** upstream terms govern the derived code, and I couldn't find a
+> license file in the fork. Confirm `unitree_rl_mjlab`'s license and add the
+> matching `LICENSE` here before treating this as freely reusable.
+
+Non-G1 robot meshes were removed to keep the repo at 67 MB; their constants modules
+stay, because the package imports them.
