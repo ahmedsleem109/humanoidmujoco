@@ -256,9 +256,10 @@ What's mine is the study: the deterministic push
 (`recovery_metrics.py`), the three ablation arms (`robust_env_cfg.py`), the
 evaluation and analysis tooling, the frozen protocol, and the writeup.
 
-> ⚠️ **Licensing:** upstream terms govern the derived code, and I couldn't find a
-> license file in the fork. Confirm `unitree_rl_mjlab`'s license and add the
-> matching `LICENSE` here before treating this as freely reusable.
+**License: [Apache 2.0](LICENSE)** — the same license as everything it builds on.
+[`NOTICE`](NOTICE) records the attribution chain and lists exactly what I added,
+changed and removed, which is what Apache §4(b) asks of a derivative work. Use it
+freely; keep the notices.
 
-Non-G1 robot meshes were removed to keep the repo at 67 MB; their constants modules
+Non-G1 robot meshes were removed to keep the repo small; their constants modules
 stay, because the package imports them.
