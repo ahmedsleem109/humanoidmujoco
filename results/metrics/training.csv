@@ -1,0 +1,4 @@
+policy,iterations_seen,complete,mean_reward,mean_episode_length,fell_over,error_vel_xy,error_vel_yaw,mean_action_acc,angular_momentum_mean,slip_velocity_mean,landing_force_mean
+P1_nominal,6599,True,38.24,1000.0,0.0,0.6966,1.0836,0.6832,0.911,0.1273,243.1576
+P2_push,6599,True,13.85,1000.0,0.0,1.3061,1.9477,0.9527,1.2269,0.1752,288.6954
+P3_robust,6599,True,8.78,981.89,0.125,1.5578,2.0676,0.9862,1.3077,0.1797,286.7401
