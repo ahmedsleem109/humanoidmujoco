@@ -1,0 +1,25 @@
+# Every pin here is load-bearing. Docs: docs/HANDOFF.md section 2.
+#
+#   torch 2.13 resolves to +cu130 and needs a CUDA 13 driver. On a CUDA 12.9
+#     driver `torch.cuda.is_available()` returns False and training silently
+#     runs on CPU. 2.9.1 is the newest CUDA-12 build.
+#   mujoco >= 3.11 removed `mjENBL_MULTICCD`, which breaks `import mujoco_warp`.
+#   warp-lang >= 1.13 moved `wp.context`, which breaks mjlab when an env is built.
+#   scipy is undeclared upstream but required by the terrain generator.
+#
+# Install torch from the cu129 index:
+#   pip install torch==2.9.1+cu129 torchvision==0.24.1+cu129 \
+#       --index-url https://download.pytorch.org/whl/cu129
+
+torch==2.9.1+cu129
+torchvision==0.24.1+cu129
+mjlab==1.2.0
+mujoco==3.5.0
+mujoco-warp==3.5.0
+warp-lang==1.12.0
+scipy
+tyro
+matplotlib
+numpy
+pillow
+imageio-ffmpeg

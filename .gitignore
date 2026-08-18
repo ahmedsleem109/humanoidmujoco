@@ -1,0 +1,22 @@
+# Training output — never publish. `logs/` reached 3.8 GB on this project.
+logs/
+outputs/
+wandb/
+runs/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info
+.venv/
+.pytest_cache/
+
+# Editors
+.idea/
+.vscode/
+
+MUJOCO_LOG.TXT
+
+# NOTE: checkpoints/, results/ and *.mp4 are deliberately NOT ignored here.
+# The four policy checkpoints (21 MB), the sweeps, the metrics and the three
+# comparison videos (9 MB) are the point of this repository.

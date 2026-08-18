@@ -1,0 +1,23 @@
+# Shell scripts MUST keep LF endings.
+#
+# This is not cosmetic. These launchers run under WSL/Linux, and a CRLF line
+# ending turns the shebang into `/usr/bin/env bash\r`, which fails with
+#   /usr/bin/env: 'bash\r': No such file or directory
+# That exact failure cost real time on this project — see docs/ENGINEERING_LOG.md
+# gotcha 22, where the launcher installer could not even bootstrap itself.
+*.sh text eol=lf
+
+# Python is executed by the interpreter, which handles either, but keep it
+# consistent so diffs stay clean across Windows and Linux checkouts.
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+
+# Binary — never touch these.
+*.pt binary
+*.mp4 binary
+*.png binary
+*.stl binary
+*.obj binary
+*.npz binary
